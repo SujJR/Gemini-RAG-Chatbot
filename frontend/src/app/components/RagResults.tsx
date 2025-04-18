@@ -1,44 +1,52 @@
 import React from 'react';
-import { DocumentResult } from '../types';
+import { DocumentResult, ComparisonResult } from '../types';
 
 interface RagResultsProps {
-  results: DocumentResult[];
-  queryTime: number;
+  comparisonResult: ComparisonResult;
 }
 
-const RagResults: React.FC<RagResultsProps> = ({ results, queryTime }) => {
-  if (!results || results.length === 0) {
-    return (
-      <div className="p-4 border rounded-lg bg-gray-50 text-center text-gray-500">
-        No results found
-      </div>
-    );
-  }
-
+const RagResults: React.FC<RagResultsProps> = ({ comparisonResult }) => {
+  if (!comparisonResult) return null;
+  
   return (
-    <div className="space-y-4">
-      <div className="text-sm text-gray-500">
-        Retrieved {results.length} result(s) in {queryTime.toFixed(4)} seconds
+    <div className="border rounded-lg p-4 mt-4">
+      <h3 className="text-lg font-semibold mb-3">Query Performance Results</h3>
+      
+      <div className="mb-4">
+        <h4 className="text-sm font-medium text-gray-700 mb-1">Query:</h4>
+        <p className="text-sm bg-white p-2 rounded-md border border-gray-200">{comparisonResult.query}</p>
       </div>
-
-      <div className="space-y-3 max-h-[400px] overflow-y-auto">
-        {results.map((doc, index) => (
-          <div key={index} className="p-3 border rounded-lg bg-gray-50">
-            <div className="mb-1 flex justify-between items-start">
-              <span className="font-medium text-sm">Document {index + 1}</span>
-              {doc.metadata && (
-                <span className="text-xs text-gray-500">
-                  {doc.metadata.source && `Source: ${doc.metadata.source}`}
-                  {doc.metadata.page !== undefined && ` (Page ${doc.metadata.page})`}
+      
+      <div className="mb-4">
+        <h4 className="text-sm font-medium text-gray-700 mb-2">Database Performance:</h4>
+        <div className="overflow-hidden bg-white rounded-md border border-gray-200">
+          {Object.entries(comparisonResult.responses)
+            .sort(([_, respA], [__, respB]) => respA.query_time - respB.query_time)
+            .map(([db, response], index, array) => (
+              <div 
+                key={db} 
+                className={`flex justify-between px-3 py-2 border-b last:border-b-0 text-sm ${
+                  db === comparisonResult.fastest ? 'font-medium text-green-700 bg-green-50' : ''
+                }`}
+              >
+                <span className="capitalize">
+                  {db === comparisonResult.fastest && '✓ '}
+                  {db}
                 </span>
-              )}
-            </div>
-            <p className="text-sm whitespace-pre-wrap border-t pt-2 mt-1">
-              {doc.content}
-            </p>
-          </div>
-        ))}
+                <div className="flex items-center">
+                  <span className="mr-4">{response.retrieved_docs.length} docs</span>
+                  <span>{response.query_time.toFixed(4)}s</span>
+                </div>
+              </div>
+            ))}
+        </div>
       </div>
+      
+      {comparisonResult.fastest && (
+        <div className="text-sm text-gray-500">
+          Best performance: <span className="font-medium capitalize">{comparisonResult.fastest}</span>
+        </div>
+      )}
     </div>
   );
 };

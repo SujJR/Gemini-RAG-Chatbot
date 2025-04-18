@@ -5,9 +5,11 @@ import axios from 'axios';
 import { Message as MessageType, UploadResponse, RagResponse, DatabaseType, ComparisonResult } from './types';
 import Message from './components/Message';
 import DocumentUpload from './components/DocumentUpload';
+import AsyncDocumentUpload from './components/AsyncDocumentUpload';
 import ChatInput from './components/ChatInput';
 import RagResults from './components/RagResults';
 import RagQueryForm from './components/RagQueryForm';
+import DatabasePerformance from './components/DatabasePerformance';
 
 export default function Home() {
   // Chat-related states
@@ -34,6 +36,9 @@ export default function Home() {
   
   // Tab management
   const [activeTab, setActiveTab] = useState<'chat' | 'rag'>('chat');
+  
+  // Use async RPC interface
+  const [useAsyncInterface, setUseAsyncInterface] = useState<boolean>(true);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -131,16 +136,7 @@ export default function Home() {
     setMessages(prev => [
       ...prev,
       {
-        text: `Successfully uploaded document: ${response.document.filename}. 
-        The document has been indexed in all available vector databases.
-        
-        Indexing times:
-        
-        ${indexingTimesMessage}
-        
-        Fastest database: ${fastest.db.toUpperCase()} (${fastest.time.toFixed(4)}s)
-        
-        You can now ask questions about this document using the RAG query interface.`,
+        text: `Successfully uploaded document: ${response.document.filename}.\nThe document has been indexed in all available vector databases.\n\nIndexing times:\n\n${indexingTimesMessage}\n\nFastest database: ${fastest.db.toUpperCase()} (${fastest.time.toFixed(4)}s)\n\nYou can now ask questions about this document using the RAG query interface.`,
         sender: 'bot'
       }
     ]);
@@ -198,85 +194,83 @@ export default function Home() {
           Object.entries(results).forEach(([db, result]) => {
             if (result.query_time && result.retrieved_docs && result.retrieved_docs.length > 0) {
               if (result.query_time < fastestTime) {
-                fastestTime = result.query_time;
                 fastestDb = db;
+                fastestTime = result.query_time;
               }
             }
           });
           
-          // Second pass: Format the results with clear indication of fastest
+          // Second pass: Format the comparison message
           Object.entries(results).forEach(([db, result]) => {
             if (result.query_time) {
+              const docCount = result.retrieved_docs ? result.retrieved_docs.length : 0;
               const isFastest = db === fastestDb;
-              dbComparison += `- ${db.toUpperCase()}: ${result.query_time.toFixed(4)}s (${result.retrieved_docs?.length || 0} results)${isFastest ? ' ⚡ FASTEST' : ''}\n`;
-            } else if (result.error) {
-              dbComparison += `- ${db.toUpperCase()}: Error: ${result.error}\n`;
+              dbComparison += `- ${db.toUpperCase()}: ${result.query_time.toFixed(4)}s, ${docCount} docs${isFastest ? ' (fastest)' : ''}\n`;
+            } else {
+              dbComparison += `- ${db.toUpperCase()}: Error or no results\n`;
             }
           });
           
-          // Add summary of fastest database
-          if (fastestDb) {
-            const fastestResult = results[fastestDb];
-            if (fastestResult && fastestResult.query_time) {
-              const time = fastestResult.query_time.toFixed(4);
-              dbComparison += `\nFastest database: ${String(fastestDb).toUpperCase()} (${time}s)\n\n`;
-            }
-          } else if (bestDb && typeof bestDb === 'string') {
-            dbComparison += `\nBest database: ${bestDb.toUpperCase()}\n\n`; 
-          } else {
-            dbComparison += `\nNo database returned results fast enough\n\n`;
-          }
-          
-          dbComparison += `RAG Response:\n${response.data.rag_response}`;
-          
-          // Add comparison results to messages
+          // Set combined message with results and comparison
           setMessages(prev => [
             ...prev,
             {
-              text: dbComparison,
+              text: `${response.data.rag_response}\n\n${dbComparison}`,
               sender: 'bot'
             }
           ]);
           
-          // Update state with comparison result
-          if (bestDb) {
-            setComparisonResult({
+          // Store all responses for later viewing
+          const comparisonResult: ComparisonResult = {
+            query,
+            responses: {} as Record<DatabaseType, RagResponse>,
+            fastest: fastestDb as unknown as DatabaseType | null
+          };
+          
+          // Convert database results to full RagResponses for the comparison view
+          Object.entries(results).forEach(([db, result]) => {
+            comparisonResult.responses[db as DatabaseType] = {
+              success: true,
               query,
-              responses: results as unknown as Record<DatabaseType, RagResponse>,
-              fastest: bestDb as DatabaseType
-            });
-          }
+              db_type: db,
+              query_time: result.query_time || 0,
+              rag_response: response.data.rag_response,
+              retrieved_docs: result.retrieved_docs || []
+            };
+          });
+          
+          setComparisonResult(comparisonResult);
         } else {
-          // Handle single database response (original behavior)
+          // Handle normal response from a single database
+          setMessages(prev => [
+            ...prev,
+            {
+              text: response.data.rag_response,
+              sender: 'bot'
+            }
+          ]);
+          
+          // Store the response for this database
           setRagResponses(prev => ({
             ...prev,
             [dbType]: response.data
           }));
-          
-          // Add response to chat
-          setMessages(prev => [
-            ...prev,
-            {
-              text: `${dbType.toUpperCase()} (${response.data.query_time.toFixed(4)}s): ${response.data.rag_response}`,
-              sender: 'bot'
-            }
-          ]);
         }
       } else {
         setMessages(prev => [
           ...prev,
           {
-            text: `Error querying ${compareAll ? 'databases' : dbType.toUpperCase()}: ${response.data.message || 'Unknown error'}`,
+            text: `Error: ${response.data.message || 'Unknown error'}`,
             sender: 'bot'
           }
         ]);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('RAG query error:', error);
       setMessages(prev => [
         ...prev,
         {
-          text: `Error querying ${compareAll ? 'databases' : dbType.toUpperCase()}: Request failed`,
+          text: error.response?.data?.message || 'Error processing your query',
           sender: 'bot'
         }
       ]);
@@ -284,158 +278,157 @@ export default function Home() {
       setIsQuerying(false);
     }
   };
+  
+  // Toggle between sync and async interfaces
+  const toggleInterface = () => {
+    setUseAsyncInterface(!useAsyncInterface);
+  };
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm p-4">
-        <div className="container mx-auto flex justify-between items-center">
-          <h1 className="text-xl font-bold">Vector Database RAG Comparison</h1>
-          
-          {/* Tab selector */}
-          <div className="flex space-x-2">
-            <button 
-              onClick={() => setActiveTab('chat')}
-              className={`px-3 py-2 rounded-md ${activeTab === 'chat' 
-                ? 'bg-blue-600 text-white' 
-                : 'bg-gray-200 text-gray-800'}`}
-            >
-              Chat
-            </button>
-            <button 
-              onClick={() => setActiveTab('rag')}
-              className={`px-3 py-2 rounded-md ${activeTab === 'rag' 
-                ? 'bg-blue-600 text-white' 
-                : 'bg-gray-200 text-gray-800'}`}
-            >
-              RAG Query
-            </button>
-          </div>
+    <main className="flex min-h-screen flex-col items-center bg-white">
+      <div className="container mx-auto p-4 max-w-6xl">
+        <div className="mb-6">
+          <h1 className="text-3xl font-bold mb-1">Gemini Chatbot with Vector Database RAG</h1>
+          <p className="text-gray-600">Chat with Gemini or ask questions about uploaded documents using various vector databases.</p>
         </div>
-      </header>
-
-      <div className="flex flex-1 overflow-hidden">
-        {/* Main content */}
-        <div className="flex-1 flex flex-col">
-          {/* Messages container */}
-          <div className="flex-1 overflow-y-auto p-4">
-            {messages.map((message, index) => (
-              <Message key={index} message={message} />
-            ))}
-            <div ref={messagesEndRef} />
-            
-            {isLoading && (
-              <div className="flex justify-center my-4">
-                <div className="animate-pulse text-gray-500">Processing...</div>
-              </div>
-            )}
-          </div>
-
-          {/* Input area */}
-          <div className="p-4 border-t">
-            {activeTab === 'chat' ? (
-              <ChatInput 
-                onSendMessage={handleSendMessage} 
-                isLoading={isLoading} 
-                placeholder="Type a message..."
-              />
-            ) : (
-              <div className="space-y-4">
-                <RagQueryForm
-                  onQueryComplete={(response) => {
-                    // This is now handled directly in handleRagQuery
-                  }}
-                  isQuerying={isQuerying}
-                  setIsQuerying={setIsQuerying}
-                  availableDatabases={availableDatabases}
-                  onSubmitQuery={(query, dbType, doCompareAll) => handleRagQuery(query, dbType, doCompareAll)}
-                />
-              </div>
-            )}
-          </div>
+        
+        {/* Interface selector */}
+        <div className="mb-4 flex items-center">
+          <span className="mr-2 text-sm font-medium">Interface:</span>
+          <button 
+            onClick={toggleInterface}
+            className="px-3 py-1 text-sm bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-md transition"
+          >
+            {useAsyncInterface ? 'Using Async RPC' : 'Using REST API'}
+          </button>
         </div>
 
-        {/* Sidebar */}
-        <div className="w-80 bg-white shadow-md border-l p-4 overflow-y-auto">
-          <h2 className="text-lg font-bold mb-4">Document Management</h2>
-          
-          <DocumentUpload 
-            onUploadComplete={handleUploadComplete} 
-            isUploading={isUploading}
-            setIsUploading={setIsUploading}
-            setAvailableDatabases={setAvailableDatabases}
-          />
-          
-          {uploadStatus && (
-            <div className="mt-6">
-              <h3 className="font-medium text-gray-700 mb-2">Current Document</h3>
-              <div className="p-3 border rounded-md bg-gray-50">
-                <div className="font-medium truncate">{uploadStatus.document.filename}</div>
-                <div className="text-sm text-gray-500 mt-1">
-                  {uploadStatus.document.chunk_count} chunks indexed
-                </div>
-              </div>
+        {/* Tabs */}
+        <div className="flex border-b mb-6">
+          <button
+            className={`py-2 px-4 ${
+              activeTab === 'chat'
+                ? 'border-b-2 border-blue-500 text-blue-600 font-medium'
+                : 'text-gray-600 hover:text-blue-500'
+            }`}
+            onClick={() => setActiveTab('chat')}
+          >
+            Chat
+          </button>
+          <button
+            className={`py-2 px-4 ${
+              activeTab === 'rag'
+                ? 'border-b-2 border-blue-500 text-blue-600 font-medium'
+                : 'text-gray-600 hover:text-blue-500'
+            }`}
+            onClick={() => setActiveTab('rag')}
+          >
+            RAG Query
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* Main content area */}
+          <div className="md:col-span-2 h-[calc(100vh-240px)] flex flex-col">
+            {/* Chat messages */}
+            <div className="flex-grow overflow-y-auto bg-white rounded-lg p-4 mb-4 border border-gray-200">
+              {messages.map((message, index) => (
+                <Message key={index} message={message} />
+              ))}
+              <div ref={messagesEndRef} />
               
-              <div className="mt-4">
-                <h3 className="font-medium text-gray-700 mb-2">Indexing Performance</h3>
-                <div className="overflow-hidden bg-white rounded-md border border-gray-200">
-                  {Object.entries(uploadStatus.document.indexing_times)
-                    .filter(([_, time]) => time >= 0)
-                    .sort(([_, timeA], [__, timeB]) => timeA - timeB)
-                    .map(([db, time], index, arr) => (
-                      <div 
-                        key={db} 
-                        className={`flex justify-between items-center px-3 py-2 ${
-                          index < arr.length - 1 ? 'border-b border-gray-100' : ''
-                        } ${index === 0 ? 'font-medium text-green-600' : ''}`}
-                      >
-                        <span className="capitalize">
-                          {index === 0 && '🏆 '}
-                          {db}
-                        </span>
-                        <span>{time.toFixed(4)}s</span>
-                      </div>
-                  ))}
+              {/* Loading indicator */}
+              {isLoading && (
+                <div className="flex items-center space-x-2 text-gray-500 mt-2">
+                  <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse"></div>
+                  <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                  <div className="w-2 h-2 rounded-full bg-gray-400 animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+                  <span className="text-sm">Gemini is thinking...</span>
                 </div>
-              </div>
+              )}
             </div>
-          )}
+            
+            {/* Input area */}
+            <div>
+              <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
+              <p className="text-xs text-gray-500 mt-1">
+                Send a message to chat with Gemini, or switch to the RAG tab to ask questions about documents.
+              </p>
+            </div>
+          </div>
           
-          {comparisonResult && (
-            <div className="mt-6">
-              <h3 className="font-medium text-gray-700 mb-2">Query Performance</h3>
-              <div className="overflow-hidden bg-white rounded-md border border-gray-200">
-                {Object.entries(comparisonResult.responses)
-                  .sort(([_, respA], [__, respB]) => respA.query_time - respB.query_time)
-                  .map(([db, response], index) => (
-                    <div 
-                      key={db} 
-                      className={`flex justify-between items-center px-3 py-2 ${
-                        index < Object.keys(comparisonResult.responses).length - 1 ? 'border-b border-gray-100' : ''
-                      } ${db === comparisonResult.fastest ? 'font-medium text-green-600' : ''}`}
-                    >
-                      <span className="capitalize">
-                        {db === comparisonResult.fastest && '🏆 '}
-                        {db}
-                      </span>
-                      <span>{response.query_time.toFixed(4)}s</span>
-                    </div>
-                ))}
-              </div>
-            </div>
-          )}
-          
-          {ragResponses[activeDatabase] && (
-            <div className="mt-6">
-              <h3 className="font-medium text-gray-700 mb-2">Retrieved Documents</h3>
-              <RagResults 
-                results={ragResponses[activeDatabase]!.retrieved_docs} 
-                queryTime={ragResponses[activeDatabase]!.query_time} 
-              />
-            </div>
-          )}
+          {/* Sidebar */}
+          <div className="md:col-span-1">
+            {activeTab === 'chat' ? (
+              // Show document upload in chat tab
+              <>
+                {useAsyncInterface ? (
+                  <AsyncDocumentUpload 
+                    onUploadComplete={handleUploadComplete}
+                    isUploading={isUploading}
+                    setIsUploading={setIsUploading}
+                    setAvailableDatabases={setAvailableDatabases}
+                  />
+                ) : (
+                  <DocumentUpload 
+                    onUploadComplete={handleUploadComplete}
+                    isUploading={isUploading}
+                    setIsUploading={setIsUploading}
+                    setAvailableDatabases={setAvailableDatabases}
+                  />
+                )}
+                
+                {/* Add Performance Dashboard */}
+                {uploadStatus && (
+                  <div className="mt-6">
+                    <DatabasePerformance 
+                      indexingTimes={uploadStatus.document.indexing_times}
+                      queryTimes={Object.entries(ragResponses)
+                        .filter(([_, response]) => response !== null)
+                        .reduce((acc, [db, response]) => ({
+                          ...acc,
+                          [db]: response ? response.query_time : 0
+                        }), {})}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              // Show RAG query form in RAG tab
+              <>
+                <RagQueryForm 
+                  onSubmit={handleRagQuery}
+                  isLoading={isQuerying}
+                  databases={availableDatabases}
+                  activeDatabase={activeDatabase}
+                  setActiveDatabase={setActiveDatabase}
+                />
+                
+                {comparisonResult && (
+                  <RagResults 
+                    comparisonResult={comparisonResult}
+                  />
+                )}
+                
+                {/* Add Performance Dashboard in RAG tab too */}
+                {uploadStatus && (
+                  <div className="mt-6">
+                    <DatabasePerformance 
+                      indexingTimes={uploadStatus.document.indexing_times}
+                      queryTimes={Object.entries(ragResponses)
+                        .filter(([_, response]) => response !== null)
+                        .reduce((acc, [db, response]) => ({
+                          ...acc,
+                          [db]: response ? response.query_time : 0
+                        }), {})}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

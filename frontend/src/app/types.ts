@@ -24,6 +24,8 @@ export interface IndexingTimes {
 export interface UploadResponse {
   success: boolean;
   message: string;
+  upload_id?: string;  // Added for async uploads
+  indexing_complete?: boolean;  // Added for async uploads
   document: {
     filename: string;
     chunk_count: number;
@@ -65,5 +67,5 @@ export type DatabaseType = 'faiss' | 'chroma' | 'weaviate' | 'mongo' | 'pgvector
 export interface ComparisonResult {
   query: string;
   responses: Record<DatabaseType, RagResponse>;
-  fastest: DatabaseType;
+  fastest: DatabaseType | null;
 }
