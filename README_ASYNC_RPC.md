@@ -91,3 +91,17 @@ Each vector database is initialized with proper error handling, allowing the app
 ## Switching Between REST and Async RPC
 
 The application supports both the original REST API implementation and the new Async RPC implementation. You can switch between them using the toggle button in the UI. 
+
+<br>
+<br>
+
+## Screenshots for Async RPC Outcomes:
+<br>
+<br>
+<img width="311" alt="Screenshot 2025-04-18 at 4 04 02 PM" src="https://github.com/user-attachments/assets/0efcb92c-cfef-479b-a769-78d213fcef76" />
+<img width="776" alt="Screenshot 2025-04-18 at 4 03 21 PM" src="https://github.com/user-attachments/assets/ad82b0d2-44b7-4be0-9be6-f79e79453071" />
+<img width="776" alt="Screenshot 2025-04-18 at 4 03 29 PM" src="https://github.com/user-attachments/assets/d81328e0-ed2e-4d0c-ac52-4410bea5d056" />
+<img width="938" alt="Screenshot 2025-04-18 at 4 09 42 PM" src="https://github.com/user-attachments/assets/b3e85f0a-3124-4064-b569-f393769b5c87" />
+<img width="938" alt="Screenshot 2025-04-18 at 4 16 29 PM" src="https://github.com/user-attachments/assets/5e90a28c-1980-4fe8-8f2f-7354579f876a" />
+
+
